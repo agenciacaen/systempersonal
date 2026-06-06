@@ -30,6 +30,7 @@ interface DashboardData {
   prev_total_income: number;
   prev_total_expense: number;
   prev_net_balance: number;
+  total_account_balance: number;
 }
 
 interface MonthlyTrend {
@@ -195,6 +196,28 @@ export function DashboardClient({ initialMonth, initialSummary, initialTrend, in
           loading={loading}
         />
       </div>
+
+      <Card className="border-primary/30 bg-gradient-to-br from-primary/5 to-transparent">
+        <CardContent className="flex items-center justify-between gap-4 p-4 sm:p-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15">
+              <Wallet className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Saldo Atual (todas as contas)</p>
+              <p className="text-2xl sm:text-3xl font-bold tracking-tight">
+                {formatCurrency(data?.total_account_balance ?? 0)}
+              </p>
+            </div>
+          </div>
+          <div className="text-right text-xs text-muted-foreground hidden sm:block">
+            <p>Receitas − Despesas do mês</p>
+            <p className="font-medium text-foreground">
+              {formatCurrency(data?.net_balance ?? 0)}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {data && data.goal_savings_goal > 0 && (
         <Card>

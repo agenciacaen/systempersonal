@@ -13,7 +13,8 @@ import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, DollarSign, Wallet
 import { addMonths, subMonths } from "date-fns";
 import { MonthlyTrendChart } from "@/components/charts/monthly-trend";
 import { CategoryPieChart } from "@/components/charts/category-pie";
-import { AccountBreakdownChart, type AccountBreakdown } from "@/components/charts/account-breakdown";
+import { type AccountBreakdown } from "@/components/charts/account-breakdown";
+import { AccountBalancesCard } from "@/components/accounts/account-balances-card";
 import { BudgetAlerts } from "@/components/goals/budget-alerts";
 import { DailyExpenseChart } from "@/components/charts/daily-expense";
 import { normalizeCategoryName } from "@/lib/text";
@@ -226,7 +227,7 @@ export function DashboardClient({ initialMonth, initialSummary, initialTrend, in
 
       <div className="grid gap-6 lg:grid-cols-2">
         <MonthlyTrendChart data={trend} />
-        <AccountBreakdownChart data={accountBreakdown} monthLabel={formatMonth(month)} />
+        <AccountBalancesCard />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

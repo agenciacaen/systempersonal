@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, DollarSign, Wallet, Target, ArrowUp, ArrowDown, Minus } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, DollarSign, Wallet, Target, ArrowUp, ArrowDown, Minus, PiggyBank } from "lucide-react";
 import { addMonths, subMonths } from "date-fns";
 import { MonthlyTrendChart } from "@/components/charts/monthly-trend";
 import { CategoryPieChart } from "@/components/charts/category-pie";
@@ -183,41 +183,19 @@ export function DashboardClient({ initialMonth, initialSummary, initialTrend, in
           className="border-destructive/30"
         />
         <KpiCard
-          title="Saldo do Mês"
-          value={data?.net_balance ?? 0}
-          prev={data?.prev_net_balance}
-          icon={DollarSign}
+          title="Saldo Atual"
+          value={data?.total_account_balance ?? 0}
+          icon={Wallet}
           loading={loading}
+          className="border-primary/30"
         />
         <KpiCard
           title="Economia"
           value={data?.savings_value ?? 0}
-          icon={Wallet}
+          icon={PiggyBank}
           loading={loading}
         />
       </div>
-
-      <Card className="border-primary/30 bg-gradient-to-br from-primary/5 to-transparent">
-        <CardContent className="flex items-center justify-between gap-4 p-4 sm:p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15">
-              <Wallet className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Saldo Atual (todas as contas)</p>
-              <p className="text-2xl sm:text-3xl font-bold tracking-tight">
-                {formatCurrency(data?.total_account_balance ?? 0)}
-              </p>
-            </div>
-          </div>
-          <div className="text-right text-xs text-muted-foreground hidden sm:block">
-            <p>Receitas − Despesas do mês</p>
-            <p className="font-medium text-foreground">
-              {formatCurrency(data?.net_balance ?? 0)}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
 
       {data && data.goal_savings_goal > 0 && (
         <Card>

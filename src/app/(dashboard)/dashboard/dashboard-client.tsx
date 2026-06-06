@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, DollarSign, Wallet, Target, ArrowUp, ArrowDown, Minus, PiggyBank } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, DollarSign, Wallet, Target, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { addMonths, subMonths } from "date-fns";
 import { MonthlyTrendChart } from "@/components/charts/monthly-trend";
 import { CategoryPieChart } from "@/components/charts/category-pie";
@@ -164,7 +164,7 @@ export function DashboardClient({ initialMonth, initialSummary, initialTrend, in
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <KpiCard
           title="Receitas"
           value={data?.total_income ?? 0}
@@ -188,12 +188,6 @@ export function DashboardClient({ initialMonth, initialSummary, initialTrend, in
           icon={Wallet}
           loading={loading}
           className="border-primary/30"
-        />
-        <KpiCard
-          title="Economia"
-          value={data?.savings_value ?? 0}
-          icon={PiggyBank}
-          loading={loading}
         />
       </div>
 

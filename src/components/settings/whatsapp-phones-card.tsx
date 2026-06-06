@@ -95,8 +95,15 @@ export function WhatsAppPhonesCard() {
     }
     setSubmitting(true);
     const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error("Sessão expirada. Faça login novamente.");
+      setSubmitting(false);
+      return;
+    }
     const { error } = await (supabase.from as any)("whatsapp_phones")
       .insert({
+        user_id: user.id,
         phone: normalized,
         label: newLabel.trim() || null,
         is_primary: phones.length === 0,

@@ -12,6 +12,7 @@ import { LogOut, User, PiggyBank, ChevronRight, Webhook, Copy, Check, Download, 
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Link from "next/link";
+import { WhatsAppPhonesCard } from "@/components/settings/whatsapp-phones-card";
 
 export default function ConfiguracoesPage() {
   const router = useRouter();
@@ -206,6 +207,8 @@ export default function ConfiguracoesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <WhatsAppPhonesCard />
 
       <Card>
         <CardHeader>

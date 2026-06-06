@@ -1628,6 +1628,109 @@ async function handleTransactionCommand(supabase: any, userId: string, parsed: {
   }
 }
 
+// ===== WHATSAPP PHONES (list/add/remove/set_primary) =====
+function isPhoneCommand(text: string): { action: string; params: Record<string, any> } | null {
+  const lc = text.trim().toLowerCase();
+  const norm = lc.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  if (/^(?:lista|mostra|quais|ver|meus?)\s+(?:os\s+)?numeros?\s*(?:de\s+whatsapp)?\s*$/i.test(norm)
+    || /^(?:meus?)\s+numeros?\s*$/i.test(norm)
+    || /^numeros\s+cadastrados\s*$/i.test(norm)) {
+    return { action: "list", params: {} };
+  }
+
+  // ADD: "adiciona numero 44999998888" / "cadastra meu whatsapp 44999998888" / "novo numero 44999998888 Trabalho"
+  const addMatch = norm.match(/^(?:adiciona|cadastra|registra|novo|adicionar|cadastrar)\s+(?:numero|whatsapp|num|telefone)?\s*(\d{10,13})(?:\s+(?:como|rotulado|com nome|chamado|rotulo)\s+(.+))?$/i)
+    || norm.match(/^(?:adiciona|cadastra|registra|novo)\s+(?:numero|whatsapp|num|telefone)\s+(\d{10,13})(?:\s+(.+))?$/i);
+  if (addMatch) {
+    return {
+      action: "add",
+      params: {
+        phone: addMatch[1],
+        label: addMatch[2]?.trim() || null,
+      },
+    };
+  }
+
+  // REMOVE: "remove numero 44999998888" / "deleta 44999998888"
+  const removeMatch = norm.match(/^(?:remove|apaga|deleta|exclui|remover)\s+(?:numero|whatsapp|num)?\s*(\d{10,13})\s*$/i);
+  if (removeMatch) {
+    return { action: "remove", params: { phone: removeMatch[1] } };
+  }
+
+  // SET PRIMARY: "torna 44999998888 principal" / "define 44999998888 como principal"
+  const primaryMatch = norm.match(/^(?:torna|define|faz)\s+(\d{10,13})\s+(?:como\s+)?principal\s*$/i)
+    || norm.match(/^(\d{10,13})\s+(?:como\s+)?principal\s*$/i);
+  if (primaryMatch) {
+    return { action: "set_primary", params: { phone: primaryMatch[1] } };
+  }
+
+  return null;
+}
+
+async function handlePhoneCommand(supabase: any, userId: string, parsed: { action: string; params: Record<string, any> }): Promise<string> {
+  try {
+    if (parsed.action === "list") {
+      const r = await (supabase.rpc as any)("agent_phone_op", { payload: { action: "list", user_id: userId } });
+      const data = r as any;
+      if (!data?.ok) return `❌ ${data?.error || "erro"}`;
+      const phones: any[] = data.phones || [];
+      if (phones.length === 0) {
+        return `📱 Nenhum número cadastrado.\n\nAcesse *Configurações* no app para adicionar.`;
+      }
+      const lines: string[] = [`📱 *${phones.length} número(s) cadastrado(s)*`, ``];
+      for (const p of phones) {
+        const star = p.is_primary ? " ⭐" : "";
+        const verified = p.verified ? "✓" : "pendente";
+        const last = p.last_seen_at ? ` (visto ${formatDateBR(p.last_seen_at)})` : "";
+        const label = p.label ? ` _${p.label}_` : "";
+        lines.push(`•${star} *${p.phone}*${label} — ${verified}${last}`);
+      }
+      lines.push(``, `⭐ = principal · ✓ = verificado`);
+      return lines.join("\n");
+    }
+
+    if (parsed.action === "add") {
+      const r = await (supabase.rpc as any)("agent_phone_op", {
+        payload: {
+          action: "add",
+          user_id: userId,
+          phone: parsed.params.phone,
+          label: parsed.params.label,
+        },
+      });
+      const data = r as any;
+      if (!data?.ok) {
+        if (data?.error === "phone_in_use_by_other_user") return `❌ Esse número já está vinculado a outra conta.`;
+        return `❌ ${data?.error || "erro"}`;
+      }
+      return `✅ Número *${data.phone}* adicionado.\nJá pode enviar mensagens por ele.`;
+    }
+
+    if (parsed.action === "remove") {
+      const r = await (supabase.rpc as any)("agent_phone_op", {
+        payload: { action: "remove", user_id: userId, phone: parsed.params.phone },
+      });
+      const data = r as any;
+      if (!data?.ok) return `❌ ${data?.error || "erro"}`;
+      return `✅ Número *${parsed.params.phone}* removido.`;
+    }
+
+    if (parsed.action === "set_primary") {
+      const r = await (supabase.rpc as any)("agent_phone_op", {
+        payload: { action: "set_primary", user_id: userId, phone: parsed.params.phone },
+      });
+      const data = r as any;
+      if (!data?.ok) return `❌ ${data?.error || "erro"}`;
+      return `✅ *${parsed.params.phone}* agora é o número principal.`;
+    }
+
+    return "❓ Comando não reconhecido.";
+  } catch (e) {
+    return `❌ Erro: ${String(e)}`;
+  }
+}
+
 // ============ MAIN ============
 Deno.serve(async (req) => {
   const cors = { "Content-Type": "application/json" };
@@ -1693,9 +1796,35 @@ Deno.serve(async (req) => {
     );
     let userId: string | null = (body?.user_id as string) || null;
     if (!userId && phone) {
-      const { data: profile } = await supabase
-        .from("profiles").select("id").eq("phone", phone).maybeSingle();
-      if (profile?.id) userId = profile.id as string;
+      const { data: phoneRow } = await supabase
+        .from("whatsapp_phones").select("user_id").eq("phone", phone).maybeSingle();
+      if (phoneRow?.user_id) {
+        userId = phoneRow.user_id as string;
+        // Atualiza last_seen_at em background
+        supabase
+          .from("whatsapp_phones")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("phone", phone)
+          .then(() => {}, () => {});
+      } else {
+        // Fallback de compatibilidade: profiles.phone antigo
+        const { data: profile } = await supabase
+          .from("profiles").select("id, phone").eq("phone", phone).maybeSingle();
+        if (profile?.id) {
+          userId = profile.id as string;
+          // Migração automática: inserir em whatsapp_phones
+          const cleanPhone = (profile.phone ?? phone).replace(/\D/g, "");
+          if (cleanPhone) {
+            await supabase
+              .from("whatsapp_phones")
+              .upsert(
+                { user_id: userId, phone: cleanPhone, label: "Principal", is_primary: true, verified: true },
+                { onConflict: "user_id,phone" }
+              );
+          }
+        }
+      }
     }
 
     // Fallback: tenta resolver via messageId em transações anteriores
@@ -1781,6 +1910,12 @@ Deno.serve(async (req) => {
       const reply = await handleTransactionCommand(supabase, userId, txCmd);
       const sent = await sendWhatsAppReply(remoteJidForReply, reply);
       return new Response(JSON.stringify({ ok: true, intent: "transaction_" + txCmd.action, reply_sent: sent }), { status: 200, headers: cors });
+    }
+    const phoneCmd = isPhoneCommand(text);
+    if (phoneCmd) {
+      const reply = await handlePhoneCommand(supabase, userId, phoneCmd);
+      const sent = await sendWhatsAppReply(remoteJidForReply, reply);
+      return new Response(JSON.stringify({ ok: true, intent: "phone_" + phoneCmd.action, reply_sent: sent }), { status: 200, headers: cors });
     }
 
     // 3) "dica" explícito → Gemini com contexto

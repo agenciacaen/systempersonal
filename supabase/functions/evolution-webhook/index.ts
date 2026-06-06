@@ -1413,6 +1413,31 @@ function parseDateBR(s: string): string | null {
   return null;
 }
 
+function parseMoneyBR(s: string): number | null {
+  if (!s) return null;
+  // "R$ 1.234,56" / "1.234,56" / "1,234.56" / "1234.56" / "1234,56" / "50"
+  const clean = s.replace(/[r$\s]/gi, "").trim();
+  if (!clean) return null;
+  const hasComma = clean.includes(",");
+  const hasDot = clean.includes(".");
+  let normalized: string;
+  if (hasComma && hasDot) {
+    // "1.234,56" (BR) ou "1,234.56" (US)
+    if (clean.lastIndexOf(",") > clean.lastIndexOf(".")) {
+      normalized = clean.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = clean.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    // "1234,56" → "1234.56"
+    normalized = clean.replace(",", ".");
+  } else {
+    normalized = clean;
+  }
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
 async function handleGoalCommand(supabase: any, userId: string, parsed: { action: string; params: Record<string, any> }): Promise<string> {
   try {
     if (parsed.action === "list") {
@@ -1543,6 +1568,53 @@ function isAccountCommand(text: string): { action: string; params: Record<string
   if (/^(?:lista|mostra|quais|ver|minhas|meus?)\s+(?:as\s+)?contas?\s*$/i.test(norm) || /^(?:minhas|meus?)\s+contas?$/i.test(norm)) {
     return { action: "list", params: {} };
   }
+
+  // CREATE: "crie outra conta bancaria chamada X" / "cria conta X" / "nova conta X"
+  // "adiciona conta X" / "criar conta X tipo X"
+  const createMatch = norm.match(
+    /^(?:cri(?:e|a|ar)|adiciona|cadastra|registra|nova?)\s+(?:outra\s+)?(?:uma\s+)?conta(?:\s+bancaria)?\s+(?:chamada|com\s+nome|de\s+nome|nova)?\s*([^,]+?)(?:\s+(?:tipo|do\s+tipo|com\s+tipo)\s+(checking|savings|credit|cash|poupanca|corrente|carteira|cartao|investimento))?\s*(?:com\s+saldo\s+([\d.,]+))?\s*$/i
+  );
+  if (createMatch) {
+    const name = (createMatch[1] || "").trim();
+    if (name && name.length >= 2) {
+      return {
+        action: "create",
+        params: {
+          name,
+          type: createMatch[2] || null,
+          initial_balance: createMatch[3] ? parseMoneyBR(createMatch[3]) : null,
+        },
+      };
+    }
+  }
+
+  // RECALCULATE / LIMPAR OVERRIDE: "recalcular saldo" / "zerar saldo" / "voltar a calcular"
+  if (/^(?:recalcula|recalcular|zera|zerar|limpa|limpar|reset)\s+(?:o\s+)?saldo(?:\s+(?:da?\s+)?(?:conta\s+)?(.+))?$/i.test(norm)
+    || /^(?:volta|voltar)\s+(?:a|ao)\s+calcular(?:\s+(?:o\s+)?saldo)?(?:\s+(?:da?\s+)?(?:conta\s+)?(.+))?$/i.test(norm)
+    || /^nao\s+usar\s+(?:mais\s+)?saldo\s+ajustado(?:\s+(?:da?\s+)?(?:conta\s+)?(.+))?$/i.test(norm)) {
+    const m = norm.match(/(?:conta\s+)?(.+)$/);
+    return {
+      action: "clear_balance",
+      params: { account_name: m?.[1]?.replace(/^(?:da?\s+|de\s+)/i, "").trim() || null },
+    };
+  }
+
+  // AJUSTAR SALDO: "definir saldo da conta X para Y" / "mudar saldo X para Y" / "saldo da conta X é Y"
+  const setMatch = norm.match(
+    /^(?:definir|muda|alterar|altera|coloca|seta)\s+(?:o\s+)?saldo\s+(?:d[ao]\s+)?(?:conta\s+)?(.+?)\s+(?:para|em|=|e|eh|foi)\s+([\d.,]+)\s*$/i
+  ) || norm.match(
+    /^(?:o\s+)?saldo\s+(?:d[ao]\s+)?(?:conta\s+)?(.+?)\s+(?:para|em|=|e|eh|foi|eh\s+agora)\s+([\d.,]+)\s*$/i
+  );
+  if (setMatch) {
+    return {
+      action: "set_balance",
+      params: {
+        account_name: setMatch[1].trim(),
+        amount: parseMoneyBR(setMatch[2]),
+      },
+    };
+  }
+
   return null;
 }
 
@@ -1562,6 +1634,66 @@ async function handleAccountCommand(supabase: any, userId: string, parsed: { act
       }
       return lines.join("\n");
     }
+
+    if (parsed.action === "create") {
+      let type = parsed.params.type;
+      if (!type) {
+        const nl = (parsed.params.name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        if (/(poupanca|poupança)/i.test(nl)) type = "savings";
+        else if (/(cartao|cartão|credito|crédito)/i.test(nl)) type = "credit";
+        else if (/(carteira|dinheiro|cash)/i.test(nl)) type = "cash";
+        else if (/(investimento|cripto|acao|tesouro)/i.test(nl)) type = "investment";
+        else type = "checking";
+      }
+      const payload: any = {
+        action: "create",
+        user_id: userId,
+        name: parsed.params.name,
+        type,
+      };
+      if (parsed.params.initial_balance != null && Number.isFinite(parsed.params.initial_balance)) {
+        payload.initial_balance = parsed.params.initial_balance;
+      }
+      const r = await (supabase.rpc as any)("agent_account_op", { payload });
+      const data = r as any;
+      if (!data?.ok) {
+        if (data?.error === "duplicate_name") return `❌ Já existe uma conta com esse nome.`;
+        return `❌ ${data?.error || "erro"}`;
+      }
+      const typeLabel: Record<string, string> = {
+        checking: "Conta corrente",
+        savings: "Poupança",
+        credit: "Cartão de crédito",
+        cash: "Carteira",
+        investment: "Investimento",
+      };
+      const init = parsed.params.initial_balance != null ? ` com saldo inicial ${formatBRL(parsed.params.initial_balance)}` : "";
+      return `✅ *${data.name}* criada (${typeLabel[type] || type})${init}.\nJá pode usar no próximo gasto/receita.`;
+    }
+
+    if (parsed.action === "set_balance" || parsed.action === "clear_balance") {
+      const payload: any = {
+        action: parsed.action,
+        user_id: userId,
+      };
+      if (parsed.params.account_name) payload.name = parsed.params.account_name;
+      if (parsed.params.amount != null) payload.balance = parsed.params.amount;
+      const r = await (supabase.rpc as any)("agent_account_op", { payload });
+      const data = r as any;
+      if (!data?.ok) {
+        const err = String(data?.error || "");
+        if (err.includes("não encontrada") || err.includes("encontrada") || err.includes("not found")) {
+          return `❌ Conta não encontrada. Use \`minhas contas\` para ver os nomes.`;
+        }
+        return `❌ ${data?.error || "erro"}`;
+      }
+      if (parsed.action === "set_balance") {
+        return `✅ Saldo de *${data.name}* definido para ${formatBRL(data.balance)} 🔧.\n\n💡 _Lembre-se: ao registrar novas transações, esse ajuste manual é removido automaticamente e o saldo volta a ser calculado._`;
+      } else {
+        return `✅ Override removido de *${data.name}*. Saldo agora é calculado pelas transações.`;
+      }
+    }
+
     return "❓ Comando não reconhecido.";
   } catch (e) {
     return `❌ Erro: ${String(e)}`;

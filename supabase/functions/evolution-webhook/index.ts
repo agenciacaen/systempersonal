@@ -925,9 +925,8 @@ async function cmdBalance(supabase: any, userId: string): Promise<string> {
   const lines = [`💰 *Saldo total: ${formatBRL(total)}*`, ``, `Por conta:`];
   for (const a of data) {
     const name = a.account_name || a.name || "Sem nome";
-    const type = a.account_type || a.type || "conta";
     const balance = Number(a.current_balance ?? a.balance ?? 0);
-    lines.push(`• ${name} (${type}): ${formatBRL(balance)}`);
+    lines.push(`• ${name}: ${formatBRL(balance)}`);
   }
   return lines.join("\n");
 }

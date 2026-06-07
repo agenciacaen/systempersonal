@@ -724,39 +724,19 @@ async function handleBalanceSet(supabase: any, userId: string, text: string): Pr
     return "❌ _Não encontrei a conta. Menciona o nome:_\n• *mude o saldo do Inter para 500*\n• *defina saldo Nubank como R$ 1000*";
   }
 
-  // Pega saldo atual (calculado) pra mostrar comparação
-  const { data: balance } = await supabase
-    .from("view_account_balances")
-    .select("current_balance, calculated_balance, has_override")
-    .eq("account_id", account.id)
-    .eq("user_id", userId)
-    .maybeSingle();
-  const previousBalance = balance ? Number(balance.current_balance ?? balance.calculated_balance ?? 0) : 0;
-
-  // Define o override (update direto — service_role bypassa RLS)
   const { error } = await supabase
     .from("accounts")
     .update({
       current_balance_override: newBalance,
       balance_override_at: new Date().toISOString(),
-      balance_override_note: `Ajustado via WhatsApp (era ${formatBRL(previousBalance)})`,
+      balance_override_note: `Ajustado via WhatsApp`,
       updated_at: new Date().toISOString(),
     })
     .eq("id", account.id)
     .eq("user_id", userId);
   if (error) return `❌ _Erro ao atualizar saldo: ${error.message}_`;
 
-  const diff = newBalance - previousBalance;
-  const diffTxt = diff === 0 ? "sem alteração" : (diff > 0 ? `+${formatBRL(diff)}` : formatBRL(diff));
-
-  return [
-    `✅ *Saldo atualizado!*\n\n`,
-    `💳 *${account.name}*`,
-    `💰 *Novo saldo: ${formatBRL(newBalance)}*`,
-    `📊 Anterior (calculado): ${formatBRL(previousBalance)} _(diferença: ${diffTxt})_`,
-    ``,
-    `⚠️ _O saldo agora é fixo. Para voltar ao cálculo automático, é só dizer: "recalcule o saldo do ${account.name}"_`,
-  ].join("\n");
+  return `✅ Saldo de *${account.name}* atualizado para *${formatBRL(newBalance)}*.`;
 }
 
 async function clearAccountBalance(supabase: any, userId: string, text: string): Promise<string> {
@@ -773,7 +753,7 @@ async function clearAccountBalance(supabase: any, userId: string, text: string):
         updated_at: new Date().toISOString(),
       }).eq("id", a.id).eq("user_id", userId);
     }
-    return `🔄 *Override removido de todas as ${accs.length} conta(s).* Saldos agora seguem o cálculo automático.`;
+    return `🔄 Saldo recalculado para todas as ${accs.length} conta(s).`;
   }
 
   const { error } = await supabase.from("accounts").update({
@@ -783,7 +763,7 @@ async function clearAccountBalance(supabase: any, userId: string, text: string):
     updated_at: new Date().toISOString(),
   }).eq("id", account.id).eq("user_id", userId);
   if (error) return `❌ _Erro: ${error.message}_`;
-  return `🔄 *Override removido de ${account.name}.* Saldo agora é calculado automaticamente.`;
+  return `🔄 Saldo de *${account.name}* recalculado a partir das transações.`;
 }
 
 // Mensagens de ajuste manual precisam ser tratadas com cautela — registrar como "Ajuste manual" pelo valor
@@ -947,13 +927,8 @@ async function cmdBalance(supabase: any, userId: string): Promise<string> {
     const name = a.account_name || a.name || "Sem nome";
     const type = a.account_type || a.type || "conta";
     const balance = Number(a.current_balance ?? a.balance ?? 0);
-    const calculated = Number(a.calculated_balance ?? balance);
-    const hasOverride = !!a.has_override;
-    const marker = hasOverride ? " 🔧" : "";
-    const diff = hasOverride && calculated !== balance ? ` _(calculado: ${formatBRL(calculated)})_` : "";
-    lines.push(`• ${name} (${type})${marker}: ${formatBRL(balance)}${diff}`);
+    lines.push(`• ${name} (${type}): ${formatBRL(balance)}`);
   }
-  lines.push(``, `_🔧 = saldo ajustado manualmente_`);
   return lines.join("\n");
 }
 
@@ -1641,9 +1616,7 @@ async function handleAccountCommand(supabase: any, userId: string, parsed: { act
       if (accs.length === 0) return "💳 Nenhuma conta cadastrada.";
       const lines: string[] = [`💳 *${accs.length} conta(s)*`, ``];
       for (const a of accs) {
-        const hasOverride = a.current_balance_override !== null && a.current_balance_override !== undefined;
-        const bal = hasOverride ? `${formatBRL(a.current_balance_override)} 🔧` : `calculado`;
-        lines.push(`• *${a.name}* (${a.type}) — ${bal}`);
+        lines.push(`• *${a.name}* (${a.type})`);
       }
       return lines.join("\n");
     }
@@ -1701,9 +1674,9 @@ async function handleAccountCommand(supabase: any, userId: string, parsed: { act
         return `❌ ${data?.error || "erro"}`;
       }
       if (parsed.action === "set_balance") {
-        return `✅ Saldo de *${data.name}* definido para ${formatBRL(data.balance)} 🔧.\n\n💡 _Lembre-se: ao registrar novas transações, esse ajuste manual é removido automaticamente e o saldo volta a ser calculado._`;
+        return `✅ Saldo de *${data.name}* definido para ${formatBRL(data.balance)}.`;
       } else {
-        return `✅ Override removido de *${data.name}*. Saldo agora é calculado pelas transações.`;
+        return `✅ Saldo de *${data.name}* agora é calculado automaticamente.`;
       }
     }
 

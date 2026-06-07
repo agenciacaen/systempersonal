@@ -108,14 +108,15 @@ async function resolveAccount(supabase: any, userId: string, text: string): Prom
   //    Score = soma de (cand.length × 10 − dist) para cada par casado.
   //    Assim, uma conta que casa MAIS tokens (ex: "conta" + "pj")
   //    ganha de uma que casa só um token genérico ("conta").
-  const tokens = normText.split(/\s+/).filter((t) => t.length >= 3);
+  //    Threshold mínimo 2 caracteres para capturar siglas como "PJ", "CC", "CDB"
+  const tokens = normText.split(/\s+/).filter((t) => t.length >= 2);
   let best: { acc: AccountRow; score: number } | null = null;
   for (const a of accounts as AccountRow[]) {
     const norm = normalizeText(a.name);
     const candidates = [norm, ...norm.split(/\s+/)];
     let score = 0;
     for (const cand of candidates) {
-      if (cand.length < 3) continue;
+      if (cand.length < 2) continue;
       for (const tok of tokens) {
         const dist = levenshtein(tok, cand);
         const tolerance = Math.max(1, Math.floor(cand.length * 0.3));

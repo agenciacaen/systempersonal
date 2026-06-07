@@ -62,6 +62,11 @@ function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
+// Detecta se o texto contém verbo de transação (não deve ser tratado como ajuste de saldo)
+function hasTransactionVerb(text: string): boolean {
+  return /\b(comprei|gastei|paguei|recebi|ganhei|entrou|caiu|chegou|saiu|debitei|compra|deposito|depositou)\b/i.test(text);
+}
+
 function normalizeText(s: string): string {
   return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
@@ -100,21 +105,27 @@ async function resolveAccount(supabase: any, userId: string, text: string): Prom
   }
 
   // 3) Levenshtein — testa cada token do texto contra cada nome de conta
+  //    Score = soma de (cand.length × 10 − dist) para cada par casado.
+  //    Assim, uma conta que casa MAIS tokens (ex: "conta" + "pj")
+  //    ganha de uma que casa só um token genérico ("conta").
   const tokens = normText.split(/\s+/).filter((t) => t.length >= 3);
-  let best: { acc: AccountRow; dist: number } | null = null;
+  let best: { acc: AccountRow; score: number } | null = null;
   for (const a of accounts as AccountRow[]) {
     const norm = normalizeText(a.name);
-    // testa nome inteiro e cada palavra do nome (ex: "Nubank" + "Conta")
     const candidates = [norm, ...norm.split(/\s+/)];
+    let score = 0;
     for (const cand of candidates) {
       if (cand.length < 3) continue;
       for (const tok of tokens) {
         const dist = levenshtein(tok, cand);
-        const tolerance = Math.max(1, Math.floor(cand.length * 0.3)); // até 30% de erro
+        const tolerance = Math.max(1, Math.floor(cand.length * 0.3));
         if (dist <= tolerance) {
-          if (!best || dist < best.dist) best = { acc: a, dist };
+          score += cand.length * 10 - dist;
         }
       }
+    }
+    if (score > 0 && (!best || score > best.score)) {
+      best = { acc: a, score };
     }
   }
   return best?.acc ?? null;
@@ -270,6 +281,7 @@ function parseWithRegex(text: string): ParsedTransaction | null {
       if (isNaN(amount) || amount <= 0) continue;
       let description = (m[2] || "").trim();
       description = description.replace(/^(hoje|ontem|agora|de|por|para|pra|no|na|em|com|a|conta)\s*/i, "").trim();
+      description = description.replace(/\s*(no|do|o)\s*valor$/i, "").trim();
       if (!description) description = isIncome ? "Entrada via WhatsApp" : "Gasto via WhatsApp";
       const isGeneric = description === "Transação via WhatsApp" || description === "Gasto via WhatsApp" || description === "Entrada via WhatsApp";
 
@@ -2005,7 +2017,9 @@ Deno.serve(async (req) => {
     }
 
     // 2.5) Definir saldo diretamente: "mude o saldo do X para Y" / "recalcule o saldo"
-    if (isBalanceSetCommand(text)) {
+    //     Guarda: se tem verbo claro de transação (comprei/gastei/saiu etc),
+    //     não tratar como ajuste de saldo — deixa a transação ser parseada.
+    if (isBalanceSetCommand(text) && !hasTransactionVerb(text)) {
       const reply = await handleBalanceSet(supabase, userId, text);
       const sent = await sendWhatsAppReply(remoteJidForReply, reply);
       return new Response(JSON.stringify({ ok: true, intent: "balance_set", reply_sent: sent }), { status: 200, headers: cors });
@@ -2090,6 +2104,8 @@ Deno.serve(async (req) => {
       // Só vai pra 'pending_review' se confidence for muito baixa (< 0.5), o que é improvável
       // pois a mensagem veio do dono do número.
       const txStatus = parsed.confidence_score >= 0.5 ? "confirmed" : "pending_review";
+      // Tenta resolver a conta mencionada no texto (ex: "Saiu da conta PJ")
+      const txAccount = await resolveAccount(supabase, userId, text);
       const transactionPayload: Record<string, any> = {
         user_id: userId,
         type: parsed.type, amount: parsed.amount, description: parsed.description,
@@ -2099,6 +2115,7 @@ Deno.serve(async (req) => {
         transaction_date: todayISO(),
         provider: "evolution_api",
       };
+      if (txAccount) transactionPayload.account_id = txAccount.id;
       if (parsed.category_name) transactionPayload.category_name = parsed.category_name;
 
       const { data: txId, error } = await supabase.rpc("ingest_transaction_from_agent", { payload: transactionPayload });
